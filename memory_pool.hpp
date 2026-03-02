@@ -6,6 +6,7 @@
 #include <queue>
 #include <cstdint>
 #include <type_traits>
+#include <ranges>
 
 
 template <typename T, size_t BLOCK_SIZE = 4096>
@@ -95,9 +96,11 @@ class MemoryPool {
     // 释放内存
     void deallocate(T* ptr) {
         if (!ptr) return;
+        ptr->~T();                 // 释放前先析构
 
         Slot* slot = reinterpret_cast<Slot*>(ptr);
         if (Block* block = find_block_containing_slot(slot)) --block->used_slots;
+        // 需要用户自己避免重复释放
         
         slot->next = free_head;     // 插回空闲链表
         free_head = slot;
@@ -111,13 +114,16 @@ class MemoryPool {
             if (!blocks[i].used_slots) to_remove.push_back(i);
         }
 
-        // 倒序遍历要删除的块，以免迭代器失效
+        // 倒序遍历要删除的块，以免迭代器失效；先记录后释放，避免 rebuild_freelist() use-after-free
+        std::vector<void*> begins;
         for (auto i : std::views::reverse(to_remove)) {
-            ::operator delete(blocks[i].begin);
+            begins.push_back(blocks[i].begin);
             blocks.erase(blocks.begin() + i);
         }
         
         rebuild_freelist();
+
+        for(auto begin : begins) ::operator delete(begin);
     }
 };
 
