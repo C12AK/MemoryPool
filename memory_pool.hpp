@@ -26,27 +26,16 @@ class MemoryPool {
 
     struct Block {
         void* begin{};          // 起始地址
-        size_t used_slots{};    // 已使用的 slot 数
     };
 
     std::vector<Block> blocks;
     Slot* free_head{};          // 第一个空闲 slot
 
 
-    // 查找一个 slot 属于哪个 block
-    Block* find_block_containing_slot(Slot* slot) {
-        for (auto& block : blocks) {
-            Slot* begin = static_cast<Slot*>(block.begin), * end = begin + SLOTS_PER_BLOCK - 1;
-            if (slot >= begin && slot <= end) return &block;
-        }
-        return nullptr;
-    }
-
-
     // 扩容，申请一个新块
     void allocate_new_block() {
         void* new_block = ::operator new(BLOCK_SIZE);  // 明确指定全局分配器，避免调用 class/namespace 重载的版本
-        blocks.push_back({new_block, 0});
+        blocks.push_back({new_block});
 
         // 从后往前将 slot 依次加到链表头前面
         Slot* begin = reinterpret_cast<Slot*>(new_block), * end = begin + SLOTS_PER_BLOCK - 1;
@@ -54,23 +43,6 @@ class MemoryPool {
             cur->next = free_head;
             free_head = cur;
         }
-    }
-
-
-    // 重建空闲 slot 链表。重建后顺序和原来相反
-    inline void rebuild_freelist() {
-        Slot* new_head = nullptr, * cur = free_head;
-        while (cur) {
-            Slot* next = cur->next;
-            
-            // 如果有 block 含这个 slot ，保留，否则直接跳过
-            if (find_block_containing_slot(cur)) {
-                cur->next = new_head;
-                new_head = cur;
-            }
-            cur = next;
-        }
-        free_head = new_head;
     }
 
 
@@ -88,7 +60,6 @@ class MemoryPool {
         Slot* slot = free_head;
         free_head = slot->next;
 
-        if (Block* block = find_block_containing_slot(slot)) ++block->used_slots;
         return reinterpret_cast<T*>(slot);
     }
 
@@ -99,31 +70,10 @@ class MemoryPool {
         ptr->~T();                 // 释放前先析构
 
         Slot* slot = reinterpret_cast<Slot*>(ptr);
-        if (Block* block = find_block_containing_slot(slot)) --block->used_slots;
         // 需要用户自己避免重复释放
         
         slot->next = free_head;     // 插回空闲链表
         free_head = slot;
-    }
-
-
-    // 用户主动调用，清除所有空 block
-    void clear_blocks() {
-        std::vector<size_t> to_remove;
-        for (size_t i = 0; i < blocks.size(); ++i) {
-            if (!blocks[i].used_slots) to_remove.push_back(i);
-        }
-
-        // 倒序遍历要删除的块，以免迭代器失效；先记录后释放，避免 rebuild_freelist() use-after-free
-        std::vector<void*> begins;
-        for (auto i : std::views::reverse(to_remove)) {
-            begins.push_back(blocks[i].begin);
-            blocks.erase(blocks.begin() + i);
-        }
-        
-        rebuild_freelist();
-
-        for(auto begin : begins) ::operator delete(begin);
     }
 };
 

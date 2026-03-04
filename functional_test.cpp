@@ -64,7 +64,6 @@ void test_multi_blocks() {
     for (size_t i = 0; i < ALLOC_NUM; ++i) assert(*ptrs[i] == static_cast<int>(i));
 
     for(int* p : ptrs) pool.deallocate(p);
-    pool.clear_blocks();
 
     std::cout << "Multi-block allocate passed." << std::endl;
 }
